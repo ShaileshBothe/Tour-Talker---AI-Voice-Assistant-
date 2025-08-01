@@ -1,6 +1,6 @@
-google-generativeai
-gTTS
-SpeechRecognition
+google-generativeai==0.5.4
+gTTS==2.5.1
+SpeechRecognition==3.10.4
 PyAudio
-pydub
+pydub==0.25.1
 pyglet
