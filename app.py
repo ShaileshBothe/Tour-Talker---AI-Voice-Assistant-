@@ -4,11 +4,6 @@ import streamlit as st
 import google.generativeai as genai
 from gtts import gTTS
 import speech_recognition as sr
-import os
-import pyglet
-import time
-from pydub import AudioSegment
-from pydub.playback import play
 import io
 
 # --- App Configuration ---
@@ -52,7 +47,6 @@ def listen_and_transcribe(r, source, language='en-US'):
     """Captures and transcribes audio. Re-uses recognizer and source."""
     st.info("Listening...")
     try:
-        # Adjust for ambient noise once at the start
         audio = r.listen(source, timeout=5, phrase_time_limit=15)
         st.success("Audio captured!")
         text = r.recognize_google(audio, language=language)
@@ -62,11 +56,10 @@ def listen_and_transcribe(r, source, language='en-US'):
         st.warning("Listening timed out. Say something or press 'Stop'.")
         return None
     except sr.UnknownValueError:
-        # This is common when there's silence, so we can ignore it in a loop
         return None
     except sr.RequestError as e:
         st.error(f"Speech recognition request failed; {e}")
-        st.session_state.talking = False # Stop on API error
+        st.session_state.talking = False
         return None
 
 def get_gemini_response(query, language):
@@ -75,7 +68,6 @@ def get_gemini_response(query, language):
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
         prompt = f"You are a helpful and friendly travel assistant named Tour-Talker. Provide a concise and informative response to the following query, in {selected_language_name}: '{query}'"
         
-        # We maintain a history for context
         st.session_state.messages.append({"role": "user", "parts": [prompt]})
         response = model.generate_content(st.session_state.messages)
         st.session_state.messages.append({"role": "model", "parts": [response.text]})
@@ -83,26 +75,23 @@ def get_gemini_response(query, language):
         return response.text
     except Exception as e:
         st.error(f"An error occurred with the Gemini API: {e}")
-        st.session_state.talking = False # Stop on API error
+        st.session_state.talking = False
         return None
 
-def text_to_speech(text, lang='en'):
-    """Converts text to speech and plays it."""
+def text_to_speech_bytes(text, lang='en'):
+    """Converts text to speech and returns the audio data as bytes."""
     if not text:
-        return
+        return None
     try:
-        tts = gTTS(text=text, lang=lang, slow=False) # slow=False for faster speech
+        tts = gTTS(text=text, lang=lang, slow=False)
         audio_fp = io.BytesIO()
         tts.write_to_fp(audio_fp)
         audio_fp.seek(0)
-
-        st.info("Tour-Talker is responding...")
-        audio_segment = AudioSegment.from_file(audio_fp, format="mp3")
-        play(audio_segment)
-        st.success("Response finished.")
+        return audio_fp
     except Exception as e:
         st.error(f"An error occurred during text-to-speech: {e}")
-        st.session_state.talking = False # Stop on TTS error
+        st.session_state.talking = False
+        return None
 
 # --- Main App Logic ---
 col1, col2 = st.columns(2)
@@ -117,13 +106,13 @@ with col1:
 with col2:
     if st.button("Stop Conversation ⏹️"):
         st.session_state.talking = False
+        st.rerun()
 
-# The continuous conversation loop
 if st.session_state.talking:
-    # Initialize recognizer and microphone source
+    st.info("Conversation in progress... Press 'Stop' to end.")
     r = sr.Recognizer()
     with sr.Microphone() as source:
-        r.adjust_for_ambient_noise(source, duration=0.5) # Adjust once
+        r.adjust_for_ambient_noise(source, duration=0.5)
         while st.session_state.talking:
             lang_code = f"{st.session_state.language}-IN" if st.session_state.language in ['hi', 'mr'] else f"{st.session_state.language}-US"
             user_query = listen_and_transcribe(r, source, language=lang_code)
@@ -134,10 +123,9 @@ if st.session_state.talking:
                 
                 if gemini_response:
                     st.write(f"Tour-Talker says: {gemini_response}")
-                    text_to_speech(gemini_response, lang=st.session_state.language)
-            
-            # If the loop is still active, we continue listening.
-            # If the user pressed stop, the loop will exit here.
+                    audio_bytes = text_to_speech_bytes(gemini_response, lang=st.session_state.language)
+                    if audio_bytes:
+                        st.audio(audio_bytes, format='audio/mp3', start_time=0)
 
 # --- Display Chat History ---
 st.subheader("Conversation History")
@@ -150,6 +138,6 @@ else:
                 original_query = msg['parts'][0].split("'")[1]
                 st.chat_message("user").write(f"You: {original_query}")
             except IndexError:
-                pass # In case the prompt format changes
+                pass
         elif msg['role'] == 'model':
             st.chat_message("assistant").write(f"Tour-Talker: {msg['parts'][0]}")
